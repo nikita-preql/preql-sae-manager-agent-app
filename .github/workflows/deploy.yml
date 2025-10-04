@@ -4,11 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'src/**'
-      - 'public/**'
-      - 'package.json'
-      - 'package-lock.json'
   workflow_dispatch:
     inputs:
       tenant:
@@ -48,17 +43,57 @@ jobs:
           echo "tenant=$TENANT" >> $GITHUB_OUTPUT
 
       - name: Trigger Amplify build
+        id: build
         run: |
-          aws amplify start-job \
+          JOB_ID=$(aws amplify start-job \
             --app-id ${{ steps.amplify.outputs.app_id }} \
             --branch-name main \
-            --job-type RELEASE
+            --job-type RELEASE \
+            --query 'jobSummary.jobId' \
+            --output text)
+          
+          echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+
+      - name: Wait for build
+        run: |
+          echo "Waiting for Amplify build to complete..."
+          
+          while true; do
+            STATUS=$(aws amplify get-job \
+              --app-id ${{ steps.amplify.outputs.app_id }} \
+              --branch-name main \
+              --job-id ${{ steps.build.outputs.job_id }} \
+              --query 'job.summary.status' \
+              --output text)
+            
+            echo "Build status: $STATUS"
+            
+            if [[ "$STATUS" == "SUCCEED" ]]; then
+              echo "✅ Build succeeded!"
+              exit 0
+            elif [[ "$STATUS" == "FAILED" || "$STATUS" == "CANCELLED" ]]; then
+              echo "❌ Build failed or was cancelled"
+              exit 1
+            fi
+            
+            sleep 10
+          done
+
+      - name: Get app URL
+        id: url
+        run: |
+          APP_URL=$(aws amplify get-app \
+            --app-id ${{ steps.amplify.outputs.app_id }} \
+            --query 'app.defaultDomain' \
+            --output text)
+          
+          echo "url=https://main.$APP_URL" >> $GITHUB_OUTPUT
 
       - name: Summary
         run: |
-          echo "### Frontend Build Triggered ✅" >> $GITHUB_STEP_SUMMARY
+          echo "### Frontend Deployed ✅" >> $GITHUB_STEP_SUMMARY
           echo "**Tenant:** ${{ steps.amplify.outputs.tenant }}" >> $GITHUB_STEP_SUMMARY
-          echo "**App ID:** ${{ steps.amplify.outputs.app_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**App URL:** [${{ steps.url.outputs.url }}](${{ steps.url.outputs.url }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Monitor: https://console.aws.amazon.com/amplify/home#/${{ steps.amplify.outputs.app_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Console:** [View in AWS]https://console.aws.amazon.com/amplify/home#/${{ steps.amplify.outputs.app_id }})" >> $GITHUB_STEP_SUMMARY
 
