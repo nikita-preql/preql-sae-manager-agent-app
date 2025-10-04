@@ -1,0 +1,64 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: 'Tenant to deploy'
+        required: true
+        default: 'crb-demo'
+
+# OIDC - no AWS keys!
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Get Amplify app ID
+        id: amplify
+        run: |
+          TENANT="${{ github.event.inputs.tenant || 'crb-demo' }}"
+          APP_NAME="$TENANT-sae-agent-app"
+          
+          APP_ID=$(aws amplify list-apps \
+            --query "apps[?name=='$APP_NAME'].appId | [0]" \
+            --output text)
+          
+          echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
+          echo "tenant=$TENANT" >> $GITHUB_OUTPUT
+
+      - name: Trigger Amplify build
+        run: |
+          aws amplify start-job \
+            --app-id ${{ steps.amplify.outputs.app_id }} \
+            --branch-name main \
+            --job-type RELEASE
+
+      - name: Summary
+        run: |
+          echo "### Frontend Build Triggered ✅" >> $GITHUB_STEP_SUMMARY
+          echo "**Tenant:** ${{ steps.amplify.outputs.tenant }}" >> $GITHUB_STEP_SUMMARY
+          echo "**App ID:** ${{ steps.amplify.outputs.app_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Monitor: https://console.aws.amazon.com/amplify/home#/${{ steps.amplify.outputs.app_id }}" >> $GITHUB_STEP_SUMMARY
+
