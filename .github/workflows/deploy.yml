@@ -95,5 +95,5 @@ jobs:
           echo "**Tenant:** ${{ steps.amplify.outputs.tenant }}" >> $GITHUB_STEP_SUMMARY
           echo "**App URL:** [${{ steps.url.outputs.url }}](${{ steps.url.outputs.url }})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Console:** [View in AWS]https://console.aws.amazon.com/amplify/home#/${{ steps.amplify.outputs.app_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "**Console:** [View in AWS](https://console.aws.amazon.com/amplify/home#/${{ steps.amplify.outputs.app_id }})" >> $GITHUB_STEP_SUMMARY
 
