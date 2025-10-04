@@ -7,6 +7,22 @@ function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
 }
 
+// Type guard for MessageContentImageUrl
+function isImageUrlBlock(block: any): block is { type: "image_url"; image_url: string | { url: string } } {
+  return (
+    typeof block === "object" &&
+    block !== null &&
+    block.type === "image_url" &&
+    (typeof block.image_url === "string" ||
+      (typeof block.image_url === "object" && typeof block.image_url?.url === "string"))
+  );
+}
+
+// Extract data URL from image_url block
+function getImageUrl(block: { type: "image_url"; image_url: string | { url: string } }): string {
+  return typeof block.image_url === "string" ? block.image_url : block.image_url.url;
+}
+
 export function ToolCalls({
   toolCalls,
 }: {
@@ -68,22 +84,40 @@ export function ToolCalls({
 export function ToolResult({ message }: { message: ToolMessage }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Check if content is an array with multimodal blocks (MessageContentComplex[])
+  const isMultimodalContent = Array.isArray(message.content);
+  const imageBlocks = isMultimodalContent && Array.isArray(message.content)
+    ? message.content.filter(isImageUrlBlock)
+    : [];
+  const hasImages = imageBlocks.length > 0;
+
+  // Extract text content if multimodal
+  const textContent = isMultimodalContent && Array.isArray(message.content)
+    ? message.content
+        .filter((block: any) => block.type === "text")
+        .map((block: any) => block.text)
+        .join("\n")
+    : null;
+
+  // Parse JSON content for non-multimodal or text-only content
   let parsedContent: any;
   let isJsonContent = false;
 
+  const contentToProcess = textContent !== null ? textContent : message.content;
+
   try {
-    if (typeof message.content === "string") {
-      parsedContent = JSON.parse(message.content);
+    if (typeof contentToProcess === "string") {
+      parsedContent = JSON.parse(contentToProcess);
       isJsonContent = isComplexValue(parsedContent);
     }
   } catch {
     // Content is not JSON, use as is
-    parsedContent = message.content;
+    parsedContent = contentToProcess;
   }
 
   const contentStr = isJsonContent
     ? JSON.stringify(parsedContent, null, 2)
-    : String(message.content);
+    : String(contentToProcess);
   const contentLines = contentStr.split("\n");
   const shouldTruncate = contentLines.length > 4 || contentStr.length > 500;
   const displayedContent =
@@ -133,43 +167,68 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                 exit={{ opacity: 0, y: -20 }}
                 transition={{ duration: 0.2 }}
               >
-                {isJsonContent ? (
-                  <table className="min-w-full divide-y divide-gray-200">
-                    <tbody className="divide-y divide-gray-200">
-                      {(Array.isArray(parsedContent)
-                        ? isExpanded
-                          ? parsedContent
-                          : parsedContent.slice(0, 5)
-                        : Object.entries(parsedContent)
-                      ).map((item, argIdx) => {
-                        const [key, value] = Array.isArray(parsedContent)
-                          ? [argIdx, item]
-                          : [item[0], item[1]];
-                        return (
-                          <tr key={argIdx}>
-                            <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-gray-900">
-                              {key}
-                            </td>
-                            <td className="px-4 py-2 text-sm text-gray-500">
-                              {isComplexValue(value) ? (
-                                <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm break-all">
-                                  {JSON.stringify(value, null, 2)}
-                                </code>
-                              ) : (
-                                String(value)
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                ) : (
-                  <code className="block text-sm">{displayedContent}</code>
+                {/* Render images if present */}
+                {hasImages && (
+                  <div className="flex flex-col gap-3 mb-3">
+                    {imageBlocks.map((block: { type: "image_url"; image_url: string | { url: string } }, idx: number) => {
+                      const imageUrl = getImageUrl(block);
+                      return (
+                        <div key={idx} className="relative w-full">
+                          <img
+                            src={imageUrl}
+                            alt={`Tool output image ${idx + 1}`}
+                            className="rounded-md w-full h-auto"
+                            style={{ maxWidth: '100%', height: 'auto' }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                
+                {/* Render text/JSON content if present */}
+                {contentStr && contentStr.trim() && (
+                  <>
+                    {isJsonContent ? (
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <tbody className="divide-y divide-gray-200">
+                          {(Array.isArray(parsedContent)
+                            ? isExpanded
+                              ? parsedContent
+                              : parsedContent.slice(0, 5)
+                            : Object.entries(parsedContent)
+                          ).map((item, argIdx) => {
+                            const [key, value] = Array.isArray(parsedContent)
+                              ? [argIdx, item]
+                              : [item[0], item[1]];
+                            return (
+                              <tr key={argIdx}>
+                                <td className="px-4 py-2 text-sm font-medium whitespace-nowrap text-gray-900">
+                                  {key}
+                                </td>
+                                <td className="px-4 py-2 text-sm text-gray-500">
+                                  {isComplexValue(value) ? (
+                                    <code className="rounded bg-gray-50 px-2 py-1 font-mono text-sm break-all">
+                                      {JSON.stringify(value, null, 2)}
+                                    </code>
+                                  ) : (
+                                    String(value)
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <code className="block text-sm">{displayedContent}</code>
+                    )}
+                  </>
                 )}
               </motion.div>
             </AnimatePresence>
           </div>
+          
           {((shouldTruncate && !isJsonContent) ||
             (isJsonContent &&
               Array.isArray(parsedContent) &&
